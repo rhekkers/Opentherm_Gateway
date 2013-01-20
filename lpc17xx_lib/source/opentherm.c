@@ -2,13 +2,12 @@
 #include "leds.h"
 #include "mqtt.h"
 #include "opentherm.h"
-//#include <string.h>
-//#include <stdlib.h>
-//#include <stdio.h>
+#include "uart.h"
 
-#define OTGW_LINELEN 12      //
+#define OTGW_LINELEN 11      //
 typedef struct {
   uint8_t len;
+  // B40192CC7\r\n = 11
   char line[OTGW_LINELEN];
 } gw_state;
 
@@ -30,27 +29,10 @@ typedef struct{
 	uint8_t byte[4];
 } OTdata;
 
-typedef struct{
-	unsigned long parity:1;
-	unsigned long msgtype:3;
-	unsigned long spare:4;
-	unsigned long dataid:8;
-	unsigned long data1:8;
-	unsigned long data2:8;
-} OTframe;
-
 typedef union {
 	OTdata data;
-	//OTframe frame;
 } OTFrameInfo;
 
-
-OTFrameInfo gwframe;
-OTFrameInfo history[256];
-
-
-//typedef enum {ReadData, WriteData, InvalidData, reserverd, ReadAck, WriteAck, DataInvalid, UnknowID} MessageType;
-//typedef enum {MtoS, StoM} DirectionType;
 typedef enum {Read, Write, Both} CommandType;
 typedef enum {both, highbyte, lowbyte} ByteType;
 typedef enum {flag8, u8, s8, f8_8, u16, s16, dowtod} PayloadType;
@@ -61,140 +43,137 @@ typedef struct{
 	ByteType whichbyte;
 	PayloadType format;
 	uint8_t bitpos;
-	char* topic;
+	char *topic;
 } OTInformation;
 
 OTInformation OTInfos[] = {
-		{0x00,	Read, 	highbyte,	flag8,	0,	TPF"ch_enable"},
-		{0x00,	Read, 	highbyte, flag8, 	1,  TPF"dhw_enable"},
-		{0x00,	Read, 	highbyte, flag8, 	2,  TPF"cooling_enabled"},
-		{0x00,	Read, 	highbyte, flag8, 	3,  TPF"otc_active"},
-		{0x00, 	Read, 	highbyte, flag8, 	4,  TPF"ch2_enable"},
-		{0x00, 	Read, 	highbyte, flag8, 	5,  ""},
-		{0x00, 	Read,		highbyte, flag8, 	6,  ""},
-		{0x00, 	Read, 	highbyte, flag8, 	7,  ""},
-		{0x00, 	Read, 	lowbyte,  flag8, 	0,  TPF"fault"},
-		{0x00, 	Read, 	lowbyte,  flag8, 	1,  TPF"ch_mode"},
-		{0x00, 	Read, 	lowbyte,  flag8, 	2,  TPF"dhw_mode"},
-		{0x00, 	Read, 	lowbyte,  flag8, 	3,  TPF"flame"},
-		{0x00, 	Read, 	lowbyte,  flag8, 	4,  TPF"cooling"},
-		{0x00, 	Read, 	lowbyte,  flag8, 	5,  TPF"ch2E"},
-		{0x00, 	Read, 	lowbyte,  flag8, 	6,  TPF"diag"},
-		{0x00, 	Read, 	lowbyte,  flag8, 	7,  ""},
-		{0x01, 	Write,	both,  		f8_8, 	0,  TPF"controlsetpoint"},
-		{0x02, 	Write, 	highbyte, flag8, 	0,  "x"},
-		{0x02, 	Write, 	highbyte, flag8, 	1,  "x"},
-		{0x02, 	Write, 	highbyte, flag8, 	2,  "x"},
-		{0x02, 	Write, 	highbyte, flag8, 	3,  "x"},
-		{0x02, 	Write, 	highbyte, flag8, 	4,  "x"},
-		{0x02, 	Write, 	highbyte, flag8, 	5,  "x"},
-		{0x02, 	Write, 	highbyte, flag8, 	6,  "x"},
-		{0x02, 	Write, 	highbyte, flag8,	7,  "x"},
-		{0x02, 	Write, 	lowbyte, 	u8, 		0,  TPF"mastermemberid"},
-		{0x03, 	Read, 	highbyte, flag8, 	0,  TPF"dhwpresent"},
-		{0x03, 	Read, 	highbyte, flag8, 	1,  TPF"controltype"},
-		{0x03, 	Read, 	highbyte, flag8, 	2,  TPF"coolingsupport"},
-		{0x03, 	Read, 	highbyte, flag8, 	3,  TPF"dhwconfig"},
-		{0x03, 	Read, 	highbyte, flag8, 	4,  TPF"masterlowoff"},
-		{0x03, 	Read, 	highbyte, flag8, 	5,  TPF"ch2present"},
-		{0x03, 	Read, 	highbyte, flag8, 	6,  ""},
-		{0x03, 	Read, 	highbyte, flag8, 	7,  ""},
-		{0x03, 	Read, 	lowbyte, 	u8, 		0,  TPF"slavememberid"},
-		{0x04, 	Write, 	highbyte, u8, 		0,  TPF"commandcode"},
-		{0x04, 	Read, 	lowbyte,  u8, 		0,  TPF"commandresponse"},
-		{0x05, 	Read, 	highbyte, flag8, 	0,  TPF"servicerequest"},
-		{0x05, 	Read, 	highbyte, flag8, 	1,  TPF"lockout-reset"},
-		{0x05, 	Read, 	highbyte, flag8, 	2,  TPF"lowwaterpress"},
-		{0x05, 	Read, 	highbyte, flag8, 	3,  TPF"gasflamefault"},
-		{0x05, 	Read, 	highbyte, flag8, 	4,  TPF"airpressfault"},
-		{0x05, 	Read, 	highbyte, flag8, 	5,  TPF"waterovtemp"},
-		{0x05, 	Read, 	highbyte, flag8, 	6,  ""},
-		{0x05, 	Read, 	highbyte, flag8, 	7,  ""},
-		{0x05, 	Read, 	lowbyte, 	u8, 		0,  TPF"oemfaultcode"},
-		{0x06, 	Read, 	lowbyte,  flag8,  0,  "xxx"},
-		{0x06, 	Read, 	lowbyte,  flag8,  1,  "xxx"},
-		{0x06, 	Read, 	lowbyte,  flag8,  2,  "xxx"},
-		{0x06, 	Read, 	lowbyte,  flag8,  3,  "xxx"},
-		{0x06, 	Read, 	lowbyte,  flag8,  4,  "xxx"},
-		{0x06, 	Read, 	lowbyte,  flag8,  5,  "xxx"},
-		{0x06, 	Read, 	lowbyte,  flag8,  6,  "xxx"},
-		{0x06, 	Read, 	lowbyte,  flag8,  7,  "xxx"},
-		{0x06, 	Read, 	highbyte, flag8,  0,  "xxx"},
-		{0x06, 	Read, 	highbyte, flag8,  1,  "xxx"},
-		{0x06, 	Read, 	highbyte, flag8,  2,  "xxx"},
-		{0x06, 	Read, 	highbyte, flag8,  3,  "xxx"},
-		{0x06, 	Read, 	highbyte, flag8,  4,  "xxx"},
-		{0x06,	Read, 	highbyte, flag8,  5,  "xxx"},
-		{0x06, 	Read, 	highbyte, flag8,  6,  "xxx"},
-		{0x06, 	Read, 	highbyte, flag8,  7,  "xxx"},
-		{0x07, 	Write, 	both,     f8_8,   0,  "xxx"},
-		{0x08, 	Write, 	both, 		f8_8,  	0,  TPF"controlsetpoint2"},
-		{0x09, 	Read, 	both,     f8_8, 	0,  TPF"overridesetpoint"},
-		{0x0a, 	Write, 	highbyte, u8, 		0,  "xxx"},
-		{0x0a, 	Write, 	lowbyte, 	u8, 		0,  "xxx"},
-		{0x0b, 	Both, 	highbyte, u8, 		0,  TPF"tspindex"},
-		{0x0b, 	Both, 	lowbyte,  u8, 		0,  TPF"tspvalue"},
-		{0x0c, 	Read, 	highbyte, u8, 		0,  "xxx"},
-		{0x0c, 	Read, 	lowbyte,  u8, 		0,  "xxx"},
-		{0x0d, 	Read, 	highbyte, u8, 		0,  "xxx"},
-		{0x0d, 	Read, 	lowbyte,  u8, 		0,  "xxx"},
-		{0x0e, 	Read, 	lowbyte,  f8_8, 	0,  TPF"maxrelmdulevel"},
-		{0x0f, 	Read, 	highbyte, u8, 		0,  TPF"maxcapkw"},
-		{0x0f, 	Read, 	lowbyte,  u8, 		0,  TPF"maxcapprc"},
-		{0x10, 	Write, 	both,     f8_8, 	0,  TPF"roomsetpoint"},
-		{0x11, 	Read, 	both,     f8_8, 	0,  TPF"modulevel"},
-		{0x12, 	Read, 	both,     f8_8, 	0,  TPF"waterpressure"},
-		{0x13, 	Read, 	both,     f8_8, 	0,  TPF"dhwflow"},
-		{0x14, 	Both, 	both,     dowtod,	0,  TPF"dowtod"},
-		{0x15, 	Both, 	highbyte, u8, 		0,  TPF"month"},
-		{0x15, 	Both, 	lowbyte,  u8, 		0,  TPF"dom"},
-		{0x16, 	Both, 	lowbyte,  u8, 		0,  TPF"year"},
-		{0x17, 	Write, 	both,     f8_8, 	0,  TPF"setpointch2"},
-		{0x18, 	Write, 	both,     f8_8, 	0,  TPF"roomtemp"},
-		{0x19, 	Read,  	both, 		f8_8, 	0,  TPF"flowtemp"},
-		{0x1a, 	Read,  	both, 		f8_8, 	0,  TPF"dhwtemp"},
-		{0x1b, 	Read,  	both, 		f8_8, 	0,  TPF"outsidetemp"},
-		{0x1c, 	Read,  	both, 		f8_8, 	0,  TPF"returntemp"},
-		{0x1d, 	Read,  	both, 		f8_8, 	0,  TPF"solstortemp"},
-		{0x1e, 	Read,  	both, 		f8_8, 	0,  TPF"solcolltemp"},
-		{0x1f, 	Read,  	both, 		f8_8, 	0,  TPF"flowtemp2"},
-		{0x20, 	Read,  	both, 		f8_8, 	0,  TPF"dhw2temp"},
-		{0x21, 	Read,  	both, 		s16, 		0,  TPF"exhausttemp"},
-		{0x30, 	Read, 	highbyte, s8, 		0, 	TPF"tdhwsetu"},
-		{0x30, 	Read, 	lowbyte, 	s8, 		0,  TPF"tdhwsetl"},
-		{0x31, 	Read, 	highbyte, s8, 		0, 	TPF"maxchu"},
-		{0x31, 	Read, 	lowbyte, 	s8, 		0,  TPF"maxchl"},
-		{0x32, 	Read, 	highbyte, s8, 		0, 	TPF"otcu"},
-		{0x32, 	Read, 	lowbyte, 	s8, 		0,  TPF"otcl"},
-		{0x38, 	Both, 	both, 		f8_8, 	0, 	TPF"tdhwsetu"},  // check!!
-		{0x38, 	Both, 	both, 		f8_8, 	0,  TPF"tdhwsetl"},
-		{0x39, 	Both, 	both, 		f8_8, 	0, 	TPF"tchmax"},
-		{0x39, 	Both, 	both, 		f8_8, 	0,  TPF"tchmax"},  // check!!
-		{0x3a, 	Both, 	both, 		f8_8, 	0, 	TPF"otc"},
-		{0x3a, 	Both, 	both, 		f8_8, 	0,  TPF"otc"},
-		{0x64, 	Read, 	highbyte, flag8, 	0,  TPF"remote override 0func"},
-		{0x64, 	Read, 	highbyte, flag8, 	1,  TPF"remote override 1func"},
-		{0x64, 	Read, 	highbyte, flag8, 	2,  TPF"remote override 2func"},
-		{0x64, 	Read, 	highbyte, flag8, 	3,  TPF"remote override 3func"},
-		{0x64, 	Read, 	highbyte, flag8, 	4,  TPF"remote override 4func"},
-		{0x64, 	Read, 	highbyte, flag8, 	5,  TPF"remote override 5func"},
-		{0x64, 	Read, 	highbyte, flag8, 	6,  TPF"remote override 6func"},
-		{0x64, 	Read, 	highbyte, flag8, 	7,  TPF"remote override 7func"},
-		{0x73, 	Read, 	both, 		u16, 		0,  TPF"oemdiagcode"}, //check!!!
-		{0x74, 	Read,  	both, 		u16, 		0,  TPF"burnerstarts"},
-		{0x75, 	Read,  	both, 		u16, 		0,  TPF"chpumpstarts"},
-		{0x76, 	Read,  	both, 		u16, 		0,  TPF"dhwpvstarts"},
-		{0x77, 	Read,  	both, 		u16, 		0,  TPF"dhwburnerstarts"},
-		{0x78, 	Read,  	both, 		u16, 		0,  TPF"burnerhours"},
-		{0x79, 	Read,  	both, 		u16, 		0,  TPF"chpumphours"},
-		{0x7a, 	Read,  	both, 		u16, 		0,  TPF"dhwpvhours"},
-		{0x7b, 	Read,  	both, 		u16, 		0,  TPF"dhwburnerhours"},
-		{0x7c, 	Write, 	both, 		f8_8, 	0,  TPF"masterotversion"},
-		{0x7d, 	Read, 	both, 		f8_8, 	0,  TPF"slaveotversion"},
-		{0x7e, 	Write, 	highbyte, u8, 		0,  TPF"masterproducttype"},
-		{0x7e, 	Write, 	lowbyte, 	u8, 		0,  TPF"masterproductversion"},
-		{0x7f, 	Read, 	highbyte, u8, 		0,  TPF"slaveproducttype"},
-		{0x7f, 	Read, 	lowbyte, 	u8, 		0,  TPF"slaveproductversion"}
+		{0x00,	Read, 	highbyte,	flag8,	0,	"ch_enable"},
+		{0x00,	Read, 	highbyte, flag8, 	1,  "dhw_enable"},
+		{0x00,	Read, 	highbyte, flag8, 	2,  "cooling_enabled"},
+		{0x00,	Read, 	highbyte, flag8, 	3,  "otc_active"},
+		{0x00, 	Read, 	highbyte, flag8, 	4,  "ch2_enable"},
+		{0x00, 	Read, 	highbyte, flag8, 	5,  "0x00:5"},
+		{0x00, 	Read,		highbyte, flag8, 	6,  "0x00:6"},
+		{0x00, 	Read, 	highbyte, flag8, 	7,  "0x00:7"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	0,  "fault"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	1,  "ch_mode"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	2,  "dhw_mode"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	3,  "flame"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	4,  "cooling"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	5,  "ch2E"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	6,  "diag"},
+		{0x00, 	Read, 	lowbyte,  flag8, 	7,  "0x00:7"},
+		{0x01, 	Write,	both,  		f8_8, 	0,  "controlsetpoint"},
+		{0x02, 	Write, 	highbyte, flag8, 	0,  "0x02:0"},
+		{0x02, 	Write, 	highbyte, flag8, 	1,  "0x02:1"},
+		{0x02, 	Write, 	highbyte, flag8, 	2,  "0x02:2"},
+		{0x02, 	Write, 	highbyte, flag8, 	3,  "0x02:3"},
+		{0x02, 	Write, 	highbyte, flag8, 	4,  "0x02:4"},
+		{0x02, 	Write, 	highbyte, flag8, 	5,  "0x02:5"},
+		{0x02, 	Write, 	highbyte, flag8, 	6,  "0x02:6"},
+		{0x02, 	Write, 	highbyte, flag8,	7,  "0x02:7"},
+		{0x02, 	Write, 	lowbyte, 	u8, 		0,  "mastermemberid"},
+		{0x03, 	Read, 	highbyte, flag8, 	0,  "dhwpresent"},
+		{0x03, 	Read, 	highbyte, flag8, 	1,  "controltype"},
+		{0x03, 	Read, 	highbyte, flag8, 	2,  "coolingsupport"},
+		{0x03, 	Read, 	highbyte, flag8, 	3,  "dhwconfig"},
+		{0x03, 	Read, 	highbyte, flag8, 	4,  "masterlowoff"},
+		{0x03, 	Read, 	highbyte, flag8, 	5,  "ch2present"},
+		{0x03, 	Read, 	highbyte, flag8, 	6,  "0x03:6"},
+		{0x03, 	Read, 	highbyte, flag8, 	7,  "0x03:7"},
+		{0x03, 	Read, 	lowbyte, 	u8, 		0,  "slavememberid"},
+		{0x04, 	Write, 	highbyte, u8, 		0,  "commandcode"},
+		{0x04, 	Read, 	lowbyte,  u8, 		0,  "commandresponse"},
+		{0x05, 	Read, 	highbyte, flag8, 	0,  "servicerequest"},
+		{0x05, 	Read, 	highbyte, flag8, 	1,  "lockout-reset"},
+		{0x05, 	Read, 	highbyte, flag8, 	2,  "lowwaterpress"},
+		{0x05, 	Read, 	highbyte, flag8, 	3,  "gasflamefault"},
+		{0x05, 	Read, 	highbyte, flag8, 	4,  "airpressfault"},
+		{0x05, 	Read, 	highbyte, flag8, 	5,  "waterovtemp"},
+		{0x05, 	Read, 	highbyte, flag8, 	6,  "0x05:6"},
+		{0x05, 	Read, 	highbyte, flag8, 	7,  "0x05:7"},
+		{0x05, 	Read, 	lowbyte, 	u8, 		0,  "oemfaultcode"},
+		{0x06, 	Read, 	lowbyte,  flag8,  0,  "0x06:l0"},
+		{0x06, 	Read, 	lowbyte,  flag8,  1,  "0x06:l1"},
+		{0x06, 	Read, 	lowbyte,  flag8,  2,  "0x06:l2"},
+		{0x06, 	Read, 	lowbyte,  flag8,  3,  "0x06:l3"},
+		{0x06, 	Read, 	lowbyte,  flag8,  4,  "0x06:l4"},
+		{0x06, 	Read, 	lowbyte,  flag8,  5,  "0x06:l5"},
+		{0x06, 	Read, 	lowbyte,  flag8,  6,  "0x06:l6"},
+		{0x06, 	Read, 	lowbyte,  flag8,  7,  "0x06:l7"},
+		{0x06, 	Read, 	highbyte, flag8,  0,  "0x06:h0"},
+		{0x06, 	Read, 	highbyte, flag8,  1,  "0x06:h1"},
+		{0x06, 	Read, 	highbyte, flag8,  2,  "0x06:h2"},
+		{0x06, 	Read, 	highbyte, flag8,  3,  "0x06:h3"},
+		{0x06, 	Read, 	highbyte, flag8,  4,  "0x06:h4"},
+		{0x06,	Read, 	highbyte, flag8,  5,  "0x06:h5"},
+		{0x06, 	Read, 	highbyte, flag8,  6,  "0x06:h6"},
+		{0x06, 	Read, 	highbyte, flag8,  7,  "0x06:h7"},
+		{0x07, 	Write, 	both,     f8_8,   0,  "0x07"},
+		{0x08, 	Write, 	both, 		f8_8,  	0,  "controlsetpoint2"},
+		{0x09, 	Read, 	both,     f8_8, 	0,  "overridesetpoint"},
+		{0x0a, 	Write, 	highbyte, u8, 		0,  "0x0a:h"},
+		{0x0a, 	Write, 	lowbyte, 	u8, 		0,  "0x0a:l"},
+		{0x0b, 	Both, 	highbyte, u8, 		0,  "tspindex"},
+		{0x0b, 	Both, 	lowbyte,  u8, 		0,  "tspvalue"},
+		{0x0c, 	Read, 	highbyte, u8, 		0,  "0x0c:h"},
+		{0x0c, 	Read, 	lowbyte,  u8, 		0,  "0x0c:l"},
+		{0x0d, 	Read, 	highbyte, u8, 		0,  "0x0d:h"},
+		{0x0d, 	Read, 	lowbyte,  u8, 		0,  "0x0d:l"},
+		{0x0e, 	Read, 	lowbyte,  f8_8, 	0,  "maxrelmdulevel"},
+		{0x0f, 	Read, 	highbyte, u8, 		0,  "maxcapkw"},
+		{0x0f, 	Read, 	lowbyte,  u8, 		0,  "maxcapprc"},
+		{0x10, 	Write, 	both,     f8_8, 	0,  "roomsetpoint"},
+		{0x11, 	Read, 	both,     f8_8, 	0,  "modulevel"},
+		{0x12, 	Read, 	both,     f8_8, 	0,  "waterpressure"},
+		{0x13, 	Read, 	both,     f8_8, 	0,  "dhwflow"},
+		{0x14, 	Both, 	both,     dowtod,	0,  "dowtod"},
+		{0x15, 	Both, 	highbyte, u8, 		0,  "month"},
+		{0x15, 	Both, 	lowbyte,  u8, 		0,  "dom"},
+		{0x16, 	Both, 	lowbyte,  u8, 		0,  "year"},
+		{0x17, 	Write, 	both,     f8_8, 	0,  "setpointch2"},
+		{0x18, 	Write, 	both,     f8_8, 	0,  "roomtemp"},
+		{0x19, 	Read,  	both, 		f8_8, 	0,  "flowtemp"},
+		{0x1a, 	Read,  	both, 		f8_8, 	0,  "dhwtemp"},
+		{0x1b, 	Read,  	both, 		f8_8, 	0,  "outsidetemp"},
+		{0x1c, 	Read,  	both, 		f8_8, 	0,  "returntemp"},
+		{0x1d, 	Read,  	both, 		f8_8, 	0,  "solstortemp"},
+		{0x1e, 	Read,  	both, 		f8_8, 	0,  "solcolltemp"},
+		{0x1f, 	Read,  	both, 		f8_8, 	0,  "flowtemp2"},
+		{0x20, 	Read,  	both, 		f8_8, 	0,  "dhw2temp"},
+		{0x21, 	Read,  	both, 		s16, 		0,  "exhausttemp"},
+		{0x30, 	Read, 	highbyte, s8, 		0, 	"tdhwsetu"},
+		{0x30, 	Read, 	lowbyte, 	s8, 		0,  "tdhwsetl"},
+		{0x31, 	Read, 	highbyte, s8, 		0, 	"maxchu"},
+		{0x31, 	Read, 	lowbyte, 	s8, 		0,  "maxchl"},
+		{0x32, 	Read, 	highbyte, s8, 		0, 	"otcu"},
+		{0x32, 	Read, 	lowbyte, 	s8, 		0,  "otcl"},
+		{0x38, 	Both, 	both, 		f8_8, 	0, 	"tdhwset"},
+		{0x39, 	Both, 	both, 		f8_8, 	0, 	"tchmax"},
+		{0x3a, 	Both, 	both, 		f8_8, 	0, 	"otchcratio"},
+		{0x64, 	Read, 	highbyte, flag8, 	0,  "rof0"},
+		{0x64, 	Read, 	highbyte, flag8, 	1,  "rof1"},
+		{0x64, 	Read, 	highbyte, flag8, 	2,  "rof2"},
+		{0x64, 	Read, 	highbyte, flag8, 	3,  "rof3"},
+		{0x64, 	Read, 	highbyte, flag8, 	4,  "rof4"},
+		{0x64, 	Read, 	highbyte, flag8, 	5,  "rof5"},
+		{0x64, 	Read, 	highbyte, flag8, 	6,  "rof6"},
+		{0x64, 	Read, 	highbyte, flag8, 	7,  "rof7"},
+		{0x73, 	Read, 	both, 		u16, 		0,  "oemdiagcode"}, //check!!!
+		{0x74, 	Read,  	both, 		u16, 		0,  "burnerstarts"},
+		{0x75, 	Read,  	both, 		u16, 		0,  "chpumpstarts"},
+		{0x76, 	Read,  	both, 		u16, 		0,  "dhwpvstarts"},
+		{0x77, 	Read,  	both, 		u16, 		0,  "dhwburnerstarts"},
+		{0x78, 	Read,  	both, 		u16, 		0,  "burnerhours"},
+		{0x79, 	Read,  	both, 		u16, 		0,  "chpumphours"},
+		{0x7a, 	Read,  	both, 		u16, 		0,  "dhwpvhours"},
+		{0x7b, 	Read,  	both, 		u16, 		0,  "dhwburnerhours"},
+		{0x7c, 	Write, 	both, 		f8_8, 	0,  "masterotversion"},
+		{0x7d, 	Read, 	both, 		f8_8, 	0,  "slaveotversion"},
+		{0x7e, 	Write, 	highbyte, u8, 		0,  "masterproducttype"},
+		{0x7e, 	Write, 	lowbyte, 	u8, 		0,  "masterproductversion"},
+		{0x7f, 	Read, 	highbyte, u8, 		0,  "slaveproducttype"},
+		{0x7f, 	Read, 	lowbyte, 	u8, 		0,  "slaveproductversion"}
 };
 
 typedef struct{
@@ -245,30 +224,14 @@ static Command commandlist[] = {
   {CPF"AA"}
 };
 
+static Command localcommandlist[] = {
+  {CPF"r"},   // raw frames
+  {CPF"a"},   // all values
+  {CPF"i"}    // init
+};
 
-//typedef enum { ID, STD, LINE17, LINE18, EXCLMARK } MatchType;
-//typedef struct {
-//  MatchType type;
-//  dataid key;
-//  char* topic;
-//  int start;
-//  int width;
-//} Match;
-
-//Match matchlist[] = {
-//  {ID, "/ISk5\\", "", 0, 0},
-//  {STD, "1-0:1.8.1", TPF"/powerusage1", 10, 9},
-//  {STD, "1-0:1.8.2", TPF"/powerusage2", 10, 9},
-//  {STD, "1-0:2.8.1", TPF"/powerdeliv1", 10, 9},
-//  {STD, "1-0:2.8.2", TPF"/powerdeliv2", 10, 9},
-//  {STD, "0-0:96.14.0", TPF"/tariff", 12, 4},
-//  {STD, "1-0:1.7.0", TPF"/powerusagec", 10, 7},
-//  {STD, "1-0:2.7.0", TPF"/powerdelivc", 10, 7},
-//  {LINE17, "1-0:2.7.0", TPF"/gastimestamp", 11, 12},
-//  {LINE18, "(", TPF"/gasusage", 1, 9},
-//  {EXCLMARK,"!","", 0, 0}
-//};
-
+volatile int sendraw=0;
+volatile int sendall=0;
 
 //---------------------------------------------------------------------------
 int isMasterframe(OTFrameInfo f)
@@ -288,7 +251,15 @@ int isWriteframe(OTFrameInfo f)
 //---------------------------------------------------------------------------
 void send(char *str1, char *str2)
 {
-  mqtt_publish(str1, str2, strlen(str2), 1 /* (retain) */);
+	char *tpf = TPF;
+	size_t lenp = strlen(tpf);
+	size_t lens = strlen(str1);
+	char *const buf[lenp+lens+1];
+	register char *p = buf;
+	memcpy(p,tpf,lenp); p += lenp;
+	memcpy(p,str1,lens);
+	p[lens] = 0;
+  mqtt_publish(buf, str2, strlen(str2), 1 /* (retain) */);
 }
 //---------------------------------------------------------------------------
 int validframechar(char c)
@@ -306,12 +277,18 @@ uint8_t hextoint(char c){
 //---------------------------------------------------------------------------
 uint8_t valueChanged(uint8_t index, uint16_t value)
 {
-	if((IDHist[index].sent!=1)||(IDHist[index].value!=value)){
-		IDHist[index].sent=1;
-		IDHist[index].value=value;
+	if(sendall==1){
 		return 1;
 	}
-	return 0;
+	else
+	{
+		if((IDHist[index].sent!=1)||(IDHist[index].value!=value)){
+			IDHist[index].sent=1;
+			IDHist[index].value=value;
+			return 1;
+		}
+		return 0;
+	}
 }
 //---------------------------------------------------------------------------
 void parseline()
@@ -319,23 +296,24 @@ void parseline()
   uint8_t validhex;
 	uint8_t i;
 
-	//if(gwdata.len<8) return;
+	if(sendraw==1){
+		send("raw", gwdata.line);
+	}
 
-	uint8_t valid = 0;
 
 	// check on responses/error codes and forward those.
   Response t;
   for(i=0;(i<sizeof(responselist)/sizeof(Response));i++){
     t = responselist[i];
     if(strncmp(t.response, gwdata.line, strlen(t.response)) == 0){
-    	send(TPF"response", gwdata.line);
+    	send("response", gwdata.line);
     	return;
     }
   }
 
 	// filter on B(oiler),T(hermostat),A(nswer),R(equest)
 	if(!((gwdata.line[0]=='B')|(gwdata.line[0]=='T')|(gwdata.line[0]=='A')|(gwdata.line[0]=='R')|(gwdata.line[0]=='E'))){
-  	send(TPF"unknown", gwdata.line);
+  	send("incomplete", gwdata.line);
   	return;
 	}
 
@@ -348,7 +326,7 @@ void parseline()
 
 	if(validhex){
 		// valid frame.
-		//send(TPF"raw", gwdata.line);
+
 		OTFrameInfo f;
 		f.data.byte[0] = (hextoint(gwdata.line[1])<<4) + hextoint(gwdata.line[2]);
 		f.data.byte[1] = (hextoint(gwdata.line[3])<<4) + hextoint(gwdata.line[4]);
@@ -356,15 +334,11 @@ void parseline()
 		f.data.byte[3] = (hextoint(gwdata.line[7])<<4) + hextoint(gwdata.line[8]);
 
 		uint8_t dataid = f.data.byte[1];
-		char buf[100]="";
-		char* p = buf;
 		int found=0;
 		// assume OTInfos is sorted on Data ID
 		for(i=0; (i < (sizeof(OTInfos)/sizeof(OTInformation)))&&(OTInfos[i].ID<=dataid);i++){
 			if((OTInfos[i].ID==dataid)&&(OTInfos[i].topic!="")){
 				found=1;
-				p=buf;
-				memset(buf, 0, sizeof(buf));
 				OTInformation info = OTInfos[i];
 				if((info.rw==Both)||((info.rw==Write)&&(isWriteframe(f)))||((info.rw==Read)&&(isReadframe(f)))){
 					uint8_t ui8;
@@ -377,7 +351,6 @@ void parseline()
 					switch (info.format){
 					case flag8:
 						ui8 = (f.data.byte[2+(info.whichbyte==highbyte?0:1)]&(1<<info.bitpos))!=0?1:0;
-						p=addChar(p,0x30+ui8);
 						PutUnsignedInt(payload,'0',1, ui8);
 						if(valueChanged(i, ui8)) send(info.topic, payload);
 						break;
@@ -394,7 +367,7 @@ void parseline()
 					case f8_8:
 						payload=payload+PutUnsignedInt(payload, '0', 0, f.data.byte[2]);
 						payload=payload+PutChar(payload, '.');
-						PutUnsignedInt(payload, '0', 2, (int)((f.data.byte[3]*100)/256));
+						PutUnsignedInt(payload, '0', 2, (int)((f.data.byte[3]*100)/255));
 						if(valueChanged(i, (f.data.byte[2]<<8)|f.data.byte[3])) send(info.topic, valuebuf);
   					break;
 					case u16: //unsigned 16-bit integer 0..65535
@@ -411,43 +384,62 @@ void parseline()
 				}
 			}
 		}
-		if(found==0) send(TPF"unknown", gwdata.line);
-	} else send(TPF"invalid", gwdata.line);
+		if(found==0) send("unknown", gwdata.line);
+	} else send("invalid", gwdata.line);
 }
 //---------------------------------------------------------------------------
 // character received will be stored in linebuffer, which will be
 // processed when a line-feed (0x0a) is encountered.
 void gw_char(uint8_t c)
 {
-  if(c == 0x0d) return;
+	if(c == 0x0d) return;
   gwdata.line[gwdata.len] = c;
-  if(gwdata.line[gwdata.len] == 0x0a || gwdata.len == sizeof(gwdata.line) - 1){
+  if((gwdata.line[gwdata.len] == 0x0a) || (gwdata.len == OTGW_LINELEN - 1)){
     // discard newline, close string, parse line and clear it.
-    if(gwdata.len > 0) gwdata.line[gwdata.len] = 0;
+    gwdata.line[gwdata.len] = 0;
     parseline();
     gwdata.len = 0;
-  }else{
-    ++gwdata.len;
   }
+  else ++gwdata.len;
 }
 //---------------------------------------------------------------------------
 void OT_callback(char* topic, char* payload,int length) {
   // handle message arrived
 
-//	if(strncmp(CPF, topic, strlen(CPF)) == 0){
-//		LED9_ON;
+	if(length>0){
 		// check on valid command and forward those to the gateway
 		uint8_t i;
-	  Command t;
-	  for(i=0;(i<sizeof(commandlist)/sizeof(Command));i++){
-	    t = commandlist[i];
-	    if(strncmp(t.cmd, topic, strlen(t.cmd)) == 0){
-	    	LED9_ON;
-	    	send(TPF"cmd", payload);
-	    	return;
-	    }
-	  }
-//	}
+		Command t;
+		for(i=0;(i<sizeof(commandlist)/sizeof(Command));i++){
+			t = commandlist[i];
+			if(strncmp(t.cmd, topic, strlen(t.cmd)) == 0){
+				// send it to the gateway
+				UART0_PrintString(payload);
+				UART0_Sendchar(0x0d);
+				return;
+			}
+		}
+
+		for(i=0;(i<sizeof(localcommandlist)/sizeof(Command));i++){
+			t = localcommandlist[i];
+			if(strncmp(t.cmd, topic, strlen(topic)) == 0){
+				switch(i){
+				case 0: // d
+					sendraw=(strncmp(payload, "1", 1) == 0?1:0);
+					break;
+				case 1:	// c
+					sendall=(strncmp(payload, "1", 1) == 0?1:0);
+					break;
+				case 2:	// i
+					for(i=0; i < (sizeof(IDHist)/sizeof(OTHistory));i++){
+						IDHist[i].sent=0;
+					}
+					break;
+				}
+				return;
+			}
+		}
+	}
 }
 //---------------------------------------------------------------------------
 void OT_init(void)
@@ -458,4 +450,5 @@ void OT_init(void)
 	for(i=0; i < (sizeof(IDHist)/sizeof(OTHistory));i++){
 		IDHist[i].sent=0;
 	}
+	gwdata.len=0;
 }

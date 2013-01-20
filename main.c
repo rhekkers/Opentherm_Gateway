@@ -8,6 +8,9 @@
 #include "mqtt.h"
 #include "leds.h"
 
+// MAC: uipopt.h
+// IPs: ethernet.h
+
 uint32_t toggle = 0;
 static volatile int seccount=0;
 
@@ -37,15 +40,3 @@ int main(void)
 		}
 	}
 }
-
-//void TIMER3_IRQHandler (void)
-//{
-//	TIMER3_interrupt();
-//	toggle = ~toggle;
-//	GPIOSetValue(1, 19, toggle);  // LED7
-//	seccount++;
-//	if(seccount>30){
-//		mqtt_checkconn();
-//		seccount=0;
-//	}
-//}

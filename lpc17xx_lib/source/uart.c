@@ -84,32 +84,11 @@ void UART0_Init(int baudrate)
 	LPC_PINCON->PINSEL0 &= ~0xf0;
 	LPC_PINCON->PINSEL0 |= ((1 << 4) | (1 << 6));
 	
-	//	Bit		 Val			Descr.
-	// 	1:0			00			5	data bits
-	//					01			6
-	//					10			7
-	//					11			8
-	//	2				 0			1 stop bits
-	//					 1			2
-	//	3				 0			Disable parity
-	//					 1			Enable
-	//
-	// 	5:4			00			Odd
-	//					01			Even
-	//					10			Forced "1" stick
-	//					11			Forced "0" stick
-
-	//LPC_UART0->LCR = 0x83;	// 8 bits, no Parity, 1 Stop bit, DLAB=1
-	LPC_UART0->LCR = 0x8A;    // 7 bits, Even Parity, 1 Stop bit, DLAB=1
-
-
+	LPC_UART0->LCR = 0x83;	// 8 bits, no Parity, 1 Stop bit, DLAB=1
   Fdiv = ( pclk / 16 ) / baudrate ;	// Set baud rate
   LPC_UART0->DLM = Fdiv / 256;
   LPC_UART0->DLL = Fdiv % 256;
-
-  //LPC_UART0->LCR = 0x03;	// 8 bits, no Parity, 1 Stop bit DLAB = 0
-  LPC_UART0->LCR = 0x0A;    // 7 bits, Even Parity, 1 Stop bit, DLAB=1
-
+  LPC_UART0->LCR = 0x03;	// 8 bits, no Parity, 1 Stop bit DLAB = 0
   LPC_UART0->FCR = 0x07;		// Enable and reset TX and RX FIFO
 }
 
@@ -162,11 +141,11 @@ void UART2_Init(int baudrate)
 	LPC_PINCON->PINSEL0 |= ((1 << 20) | (1 << 22));
 
 	LPC_UART2->LCR = 0x83;		// 8 bits, no Parity, 1 Stop bit, DLAB=1
-    Fdiv = ( pclk / 16 ) / baudrate ;	// Set baud rate
-    LPC_UART2->DLM = Fdiv / 256;
-    LPC_UART2->DLL = Fdiv % 256;
-    LPC_UART2->LCR = 0x03;		// 8 bits, no Parity, 1 Stop bit DLAB = 0
-    LPC_UART2->FCR = 0x07;		// Enable and reset TX and RX FIFO
+  Fdiv = ( pclk / 16 ) / baudrate ;	// Set baud rate
+  LPC_UART2->DLM = Fdiv / 256;
+  LPC_UART2->DLL = Fdiv % 256;
+  LPC_UART2->LCR = 0x03;		// 8 bits, no Parity, 1 Stop bit DLAB = 0
+  LPC_UART2->FCR = 0x07;		// Enable and reset TX and RX FIFO
 }
 
 void UART3_Init(int baudrate)

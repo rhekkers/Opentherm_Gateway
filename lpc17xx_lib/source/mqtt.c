@@ -16,7 +16,6 @@ MEMB(publbuf, struct mqtt_pubmessage, MQTT_NUMLINES);
 #define STATE_CONNECTED 1
 
 static struct mqtt_state s;
-//struct mqtt_state *s;
 struct timer ping_timer;
 
 //---------------------------------------------------------------------------
@@ -98,7 +97,6 @@ void mqtt_init(void)
   APPLED_OFF;
   CONNLED_OFF;
   LED9_OFF;
-//  LEDX_OFF;
 
   memb_init(&publbuf);
 }
@@ -175,10 +173,6 @@ static void newdata(void)
   dataptr = (char *)uip_appdata;
 
   if(len > 0) {
-//    c = *dataptr;
-//    ++dataptr;
-//    --len;
-
     switch(s.mqttstate){
     case CONNECTING:
       if((((dataptr[0]&0xf0)>>4) == MQTT_CONNACK)
@@ -196,7 +190,6 @@ static void newdata(void)
     case SUBSCRIBING:
       if(((dataptr[0]&0xf0)>>4) == MQTT_SUBACK)
       {
-      	//LED9_ON;
       	s.mqttstate=ACTIVE;
       }
       break;
@@ -204,14 +197,12 @@ static void newdata(void)
     case ACTIVE:
     	switch(((dataptr[0]&0xf0)>>4)){
     	case MQTT_PUBLISH:
-    		//LED9_ON;
     		if(mqtt_appcallback){
-    			//LED9_ON;
     			uint16_t tl=(dataptr[2]<<8)+dataptr[3];
     			uint32_t pl=rl(dataptr)-2-tl;
           char topic[tl+1];
           char payload[pl+1];
-          uint16_t i;
+          uint16_t i=0;
           for (i=0;i<tl;i++) {
              topic[i] = dataptr[4+i];
           }
@@ -222,7 +213,6 @@ static void newdata(void)
           payload[pl] = 0;
           mqtt_appcallback(topic, payload, pl);
     		}
-    		//mqtt_publish("/sensor/command","tessie",6,0);
     		break;
     	}
     	break;
@@ -291,7 +281,6 @@ void mqtt_appcall(void)
 
     for(i = 0; i < MQTT_NUMLINES; ++i) s.msgs[i] = NULL;
     mqtt_connect(MQTT_CLIENTID, "", "", "lwt", 0, 0, MQTT_CLIENTID" died");
-    //mqtt_subscribe("testpub");
   }
 
   if(uip_closed() || uip_aborted() || uip_timedout())
@@ -430,14 +419,6 @@ void mqtt_subscribe(char *topic)
 
     s.len = p-s.buf;
     write(fixedheader(MQTT_SUBSCRIBE,0,0,0), s.buf, s.len);
-
-
-//    line = alloc_msg();
-//    if(line != NULL) {
-//      (* line).len = s.len;
-//      memcpy((* line).msg, s.buf, s.len);
-//      sendmsg(line);
-//    }
   }
 }
 //------------------------------------------------------------------------------
